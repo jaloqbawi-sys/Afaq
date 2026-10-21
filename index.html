@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="AFAQ: an integer-programming scheduler that assigns astronaut tasks to minimize fatigue and balance workload.">
+<style>*,*::before,*::after{box-sizing:border-box}html,body{margin:0}img{max-width:100%}[hidden]{display:none!important}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
+<title>AFAQ Mission Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: mission-control console. Sticky tab rail on top, one panel per tab, horizon-sun motif from the AFAQ poster (أفق = horizon). Dark-first. */
+:root{
+  --bg:#0A1230; --surface:#111B3D; --surface-2:#18244D; --line:#27355F; --fg:#E9EDF8; --muted:#9AA6C8;
+  --accent:#FF8A3D; --sun:#FFC247; --flare:#FF5A3C; --base:#7D8BB4; --good:#4FD1A5; --bad:#FF6B5B;
+  --code:#0C1534; --hatch:rgba(154,166,200,.12); --glass:rgba(17,27,61,.78);
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#F2F4FA; --surface:#FFFFFF; --surface-2:#E8ECF6; --line:#D2D9EA; --fg:#0E1A45; --muted:#56618A;
+  --accent:#D9581A; --sun:#C98A00; --flare:#D43B22; --base:#8B96B9; --good:#0F7D59; --bad:#C2372A;
+  --code:#EDF0F8; --hatch:rgba(14,26,69,.07); --glass:rgba(255,255,255,.85); color-scheme:light;}}
+:root[data-theme="light"]{
+  --bg:#F2F4FA; --surface:#FFFFFF; --surface-2:#E8ECF6; --line:#D2D9EA; --fg:#0E1A45; --muted:#56618A;
+  --accent:#D9581A; --sun:#C98A00; --flare:#D43B22; --base:#8B96B9; --good:#0F7D59; --bad:#C2372A;
+  --code:#EDF0F8; --hatch:rgba(14,26,69,.07); --glass:rgba(255,255,255,.85); color-scheme:light;}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.1}
+h2{font-size:clamp(1.5rem,1.1rem + 1.6vw,2.2rem);font-weight:700;letter-spacing:-.01em}
+h3{font-size:1.1rem;font-weight:700}
+p{margin:0}
+a{color:var(--accent)}
+.mono,code,pre{font-family:var(--f-mono)}
+.num{font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.eyebrow{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+
+/* top bar */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--glass);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topin{display:flex;align-items:center;gap:20px;padding-block:10px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--f-display);font-weight:800;font-size:1.25rem;letter-spacing:.02em;white-space:nowrap}
+.brand svg{width:34px;height:18px}
+nav.tabs{display:flex;gap:4px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none}
+nav.tabs a{flex:none;text-decoration:none;color:var(--muted);padding:8px 12px;border-radius:8px;font-weight:500;font-size:.92rem;display:flex;gap:7px;align-items:center}
+nav.tabs a b{font-family:var(--f-mono);font-weight:500;font-size:.72rem;color:var(--muted);opacity:.7}
+nav.tabs a:hover{color:var(--fg);background:var(--surface-2)}
+nav.tabs a[aria-selected="true"]{color:var(--fg);background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--accent)}
+nav.tabs a[aria-selected="true"] b{color:var(--accent);opacity:1}
+
+section.panel{padding-block:36px 64px}
+.panel-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.panel-head p{max-width:62ch;color:var(--muted);margin-top:8px}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px}
+.grid2>*,.grid3>*{min-width:0}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface-2);padding:9px 14px;border-radius:9px;cursor:pointer;font-weight:500;text-decoration:none;color:var(--fg)}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1A0E05;font-weight:600}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.small{padding:5px 10px;font-size:.85rem}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;font-size:.8rem;font-family:var(--f-mono);border:1px solid var(--line);white-space:nowrap}
+.pill.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)}
+.pill.warn{color:var(--sun);border-color:color-mix(in srgb,var(--sun) 45%,transparent)}
+.pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+/* ---------- MISSION / HERO ---------- */
+.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+#stars{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hero-in{position:relative;display:grid;grid-template-columns:1.15fr .85fr;gap:24px;align-items:center;padding-block:56px 40px}
+.hero h1{font-size:clamp(2.6rem,1.6rem + 4.2vw,4.8rem);font-weight:800;letter-spacing:-.03em}
+.hero h1 span{color:var(--accent)}
+.hero .ar{font-family:var(--f-display);color:var(--sun);font-size:1rem;margin-bottom:14px;display:flex;gap:10px;align-items:center}
+.hero .lede{font-size:1.12rem;max-width:56ch;margin-top:18px;color:var(--fg)}
+.hero .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+.stage{position:relative;height:420px;display:grid;place-items:center;perspective:1100px}
+.sunrise{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);width:360px;height:180px;border-radius:360px 360px 0 0;
+  background:radial-gradient(circle at 50% 100%,var(--sun) 0 34%,var(--accent) 35% 62%,var(--flare) 63% 100%);opacity:.9;filter:saturate(1.05)}
+.sunrise::after{content:"";position:absolute;left:-40px;right:-40px;bottom:-2px;height:3px;background:var(--fg);opacity:.5;border-radius:2px}
+.band3d{position:relative;width:150px;height:360px;transform-style:preserve-3d;animation:sway 9s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:rotateX(14deg) rotateY(-28deg)}50%{transform:rotateX(8deg) rotateY(24deg)}}
+@media (prefers-reduced-motion: reduce){.band3d{animation:none;transform:rotateX(10deg) rotateY(-18deg)}}
+.strap{position:absolute;left:28px;width:94px;height:150px;border-radius:30px;background:repeating-linear-gradient(0deg,#1C2233 0 5px,#232A3E 5px 7px);box-shadow:inset 0 0 0 1px #2E3650}
+.strap.t{top:0;transform:translateZ(-14px) rotateX(-12deg);transform-origin:bottom}
+.strap.b{bottom:0;transform:translateZ(-14px) rotateX(12deg);transform-origin:top}
+.pod{position:absolute;top:96px;left:12px;width:126px;height:168px;border-radius:36px;background:linear-gradient(160deg,#3A4258,#1A1F2E 60%);transform:translateZ(18px);
+  box-shadow:0 30px 60px -20px rgba(0,0,0,.7),inset 0 0 0 2px #485069}
+.pod::before{content:"";position:absolute;right:-6px;top:64px;width:6px;height:34px;border-radius:0 4px 4px 0;background:#2B3246}
+.screen{position:absolute;inset:10px;border-radius:28px;background:#05070D;color:#F3F4F8;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-family:var(--f-mono);text-align:center;padding:26px 8px 10px}
+.screen .s-top{position:absolute;top:12px;left:16px;right:16px;display:flex;justify-content:space-between;font-size:.55rem;color:#FF9A4D;font-weight:600}
+.screen .s-top i{font-style:normal;color:#C9CCD6}
+.screen .s-lab{font-size:.6rem;color:#B9BDCB}
+.screen .s-big{font-size:1.7rem;font-weight:600;line-height:1.1}
+.screen .s-lvl{font-size:.7rem;font-weight:600;color:#FF9A4D}
+.screen .s-bars{display:flex;gap:3px;margin-top:4px}
+.screen .s-bars span{width:12px;height:3px;border-radius:2px;background:#FF9A4D}
+.screen .s-bars span.off{background:#3A3F4E}
+.screen .s-sub{font-size:.52rem;color:#9EA3B3;margin-top:8px;line-height:1.4}
+.hero-tag{position:absolute;font-family:var(--f-mono);font-size:.72rem;color:var(--muted);background:var(--glass);border:1px solid var(--line);padding:6px 10px;border-radius:8px}
+.hero-tag b{color:var(--fg);font-weight:600}
+
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);margin-top:28px}
+.facts>div{padding:18px 20px;border-left:1px solid var(--line)}
+.facts>div:first-child{border-left:0}
+.facts .v{font-family:var(--f-display);font-size:2rem;font-weight:800;color:var(--accent);line-height:1}
+.facts .k{font-size:.86rem;color:var(--muted);margin-top:6px}
+
+.pipeline{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px;counter-reset:st}
+.pipeline .st{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.pipeline .st:not(:last-child)::after{content:"→";position:absolute;right:-12px;top:50%;transform:translate(50%,-50%);color:var(--accent);font-weight:700;z-index:1}
+.pipeline .st h3{font-size:1rem;margin:6px 0 4px}
+.pipeline .st p{font-size:.88rem;color:var(--muted)}
+.rq{border-left:3px solid var(--sun);padding:6px 0 6px 16px;font-family:var(--f-display);font-size:1.2rem;font-weight:500;max-width:62ch}
+.obj-list{display:grid;gap:12px}
+.obj-list div{display:grid;grid-template-columns:28px 1fr;gap:10px}
+.obj-list .n{font-family:var(--f-mono);color:var(--accent);font-weight:600}
+.poster-thumb{display:block;border-radius:10px;border:1px solid var(--line);width:100%;height:auto}
+
+/* ---------- BUILDER ---------- */
+.builder{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+.builder .side{position:sticky;top:calc(env(safe-area-inset-top,0px) + 76px);display:grid;gap:14px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:16px}
+.step-h{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.step-h h3 small{font-family:var(--f-mono);color:var(--accent);font-weight:500;font-size:.78rem;margin-right:8px}
+.step-h p{font-size:.86rem;color:var(--muted);width:100%}
+.tbl-wrap{overflow-x:auto;margin-inline:-4px;padding-inline:4px}
+table.form{border-collapse:collapse;width:100%;font-size:.88rem}
+table.form th{font-weight:500;color:var(--muted);text-align:left;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;padding:6px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.form td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.form input[type=text],table.form input[type=number],.rules input[type=number],.rules input[type=text]{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 8px;width:100%;min-width:56px}
+table.form input[type=text]{min-width:130px}
+table.form input:focus,.rules input:focus{border-color:var(--accent);outline:none}
+.chk{display:inline-flex;align-items:center;gap:3px;margin-right:6px;font-family:var(--f-mono);font-size:.78rem;white-space:nowrap;cursor:pointer}
+input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
+.x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:2px 6px;border-radius:6px}
+.x:hover{color:var(--bad);background:var(--surface-2)}
+.tag{font-family:var(--f-mono);font-size:.78rem;color:var(--accent);font-weight:600}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.rules label{display:grid;gap:4px;font-size:.8rem;color:var(--muted)}
+.presets{display:flex;gap:8px;flex-wrap:wrap}
+.presets .btn.on{border-color:var(--accent);color:var(--accent)}
+.heat{border-collapse:separate;border-spacing:3px;width:100%;font-family:var(--f-mono);font-size:.8rem}
+.heat th{font-weight:500;color:var(--muted);font-size:.72rem;text-align:center}
+.heat th:first-child{text-align:left}
+.heat td{text-align:center;border-radius:6px;padding:6px 2px;font-variant-numeric:tabular-nums}
+.heat td.asleep{background:repeating-linear-gradient(45deg,var(--hatch) 0 4px,transparent 4px 8px);color:var(--muted);font-size:.66rem}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:.88rem}
+.kv span:nth-child(even){font-family:var(--f-mono);text-align:right}
+.mission-name{font-family:var(--f-display);font-size:1.3rem;font-weight:700;background:transparent;border:0;border-bottom:1px dashed var(--line);padding:4px 0;width:100%;color:var(--fg)}
+.mission-name:focus{outline:none;border-bottom-color:var(--accent)}
+
+/* ---------- SCHEDULE ---------- */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .k{font-size:.8rem;color:var(--muted)}
+.kpi .v{font-family:var(--f-display);font-size:2rem;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .d{font-family:var(--f-mono);font-size:.78rem;margin-top:2px}
+.kpi .d.up{color:var(--good)} .kpi .d.flat{color:var(--muted)} .kpi .d.down{color:var(--bad)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:3px;background:var(--surface)}
+.seg button{border:0;background:none;padding:6px 12px;border-radius:7px;cursor:pointer;color:var(--muted);font-weight:500;font-size:.88rem}
+.seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--fg);box-shadow:inset 0 -2px 0 var(--accent)}
+.sched-wrap{overflow-x:auto}
+table.sched{border-collapse:separate;border-spacing:6px;width:100%;min-width:560px}
+table.sched th{font-family:var(--f-mono);font-weight:500;font-size:.76rem;color:var(--muted);text-align:left;padding:2px 4px}
+table.sched th.who{width:190px}
+.who b{display:block;font-family:var(--f-body);color:var(--fg);font-size:.92rem;font-weight:600}
+.who span{font-size:.75rem}
+.cell{border-radius:9px;padding:9px 11px;min-height:58px;font-size:.85rem;border:1px solid var(--line)}
+.cell.task{background:color-mix(in srgb,var(--accent) 16%,var(--surface));border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.cell.task.hot{background:color-mix(in srgb,var(--flare) 24%,var(--surface));border-color:color-mix(in srgb,var(--flare) 60%,var(--line))}
+.cell.task b{display:block;font-weight:600}
+.cell.task i{font-style:normal;font-family:var(--f-mono);font-size:.72rem;color:var(--muted)}
+.cell.rest{color:var(--muted);background:var(--surface)}
+.cell.sleep{color:var(--muted);background:repeating-linear-gradient(45deg,var(--hatch) 0 5px,transparent 5px 10px)}
+.cell.moved{box-shadow:inset 0 0 0 2px var(--sun)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-top:8px}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.sw.base{background:var(--base)} .sw.afaq{background:var(--accent)} .sw.moved{box-shadow:inset 0 0 0 2px var(--sun)}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--fg);font-family:var(--f-mono);font-size:11px}
+.chart text.lab{fill:var(--muted);font-family:var(--f-body);font-size:12px}
+.chart .bar-base{fill:var(--base)} .chart .bar-afaq{fill:var(--accent)} .chart .grid{stroke:var(--line);stroke-width:1}
+.chart .peak{stroke:var(--flare);stroke-dasharray:4 3;stroke-width:1.5}
+.bands{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.bandmini{background:var(--surface-2);border-radius:12px;padding:16px 10px;display:grid;justify-items:center;gap:8px}
+.bandmini .pod2{width:132px;height:176px;border-radius:38px;background:linear-gradient(160deg,#3A4258,#1A1F2E 60%);position:relative;box-shadow:inset 0 0 0 2px #485069}
+.bandmini .pod2 .screen{inset:9px}
+.bandmini .cap{font-size:.78rem;color:var(--muted);text-align:center}
+.report{background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-family:var(--f-mono);font-size:.82rem;white-space:pre;overflow-x:auto;line-height:1.6}
+details.vars summary{cursor:pointer;color:var(--accent);font-weight:500;margin-top:12px}
+table.vt{border-collapse:collapse;font-family:var(--f-mono);font-size:.8rem;width:100%}
+table.vt th,table.vt td{padding:4px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+table.vt th:first-child,table.vt td:first-child{text-align:left}
+table.vt tr.on td{color:var(--accent);font-weight:600}
+.stale{display:none;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--sun) 50%,transparent);color:var(--sun);border-radius:10px;padding:10px 14px;font-size:.9rem;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.stale.show{display:flex}
+.errbox{border:1px solid color-mix(in srgb,var(--bad) 50%,transparent);color:var(--bad);border-radius:12px;padding:16px;margin-bottom:14px}
+
+/* ---------- SCENARIOS ---------- */
+table.data{border-collapse:collapse;width:100%;font-size:.9rem}
+table.data th{text-align:left;font-weight:500;color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border-bottom:1px solid var(--line)}
+table.data td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.data td.n{font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+table.data th.n{text-align:right}
+.good{color:var(--good)}
+
+/* ---------- MODEL & CODE ---------- */
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.code{background:var(--code);border:1px solid var(--line);border-radius:12px;position:relative}
+.code pre{margin:0;padding:16px 18px;overflow:auto;max-height:560px;font-size:.8rem;line-height:1.6;white-space:pre}
+.code .bar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:.8rem;color:var(--muted);flex-wrap:wrap}
+.c-com{color:var(--muted);font-style:italic}
+.c-kw{color:var(--sun)}
+.c-num{color:var(--accent)}
+.math{display:grid;gap:14px}
+.math .eq{font-family:var(--f-mono);font-size:.92rem;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;white-space:nowrap}
+.math .eq sub{font-size:.7em}
+.math dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:.9rem}
+.math dt{font-family:var(--f-mono);color:var(--accent)}
+.math dd{margin:0;color:var(--muted)}
+.xl{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.xl-fx{display:flex;gap:0;border-bottom:1px solid var(--line);font-family:var(--f-mono);font-size:.8rem}
+.xl-fx span{padding:7px 12px;border-right:1px solid var(--line);color:var(--muted);min-width:64px}
+.xl-fx code{padding:7px 12px;white-space:nowrap;overflow-x:auto}
+.xl-grid{overflow:auto;max-height:440px}
+.xl-grid table{border-collapse:collapse;font-family:var(--f-mono);font-size:.78rem}
+.xl-grid th{background:var(--surface-2);color:var(--muted);font-weight:500;padding:4px 10px;border:1px solid var(--line);position:sticky;top:0}
+.xl-grid td{padding:4px 10px;border:1px solid var(--line);white-space:nowrap;cursor:cell}
+.xl-grid td.rn{background:var(--surface-2);color:var(--muted);text-align:center;position:sticky;left:0;cursor:default}
+.xl-grid td.h{font-weight:600;background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.xl-grid td.f{color:var(--accent)}
+.xl-grid td.sel{outline:2px solid var(--good);outline-offset:-2px}
+.xl-tabs{display:flex;border-top:1px solid var(--line);overflow-x:auto}
+.xl-tabs button{border:0;border-right:1px solid var(--line);background:var(--surface-2);padding:7px 14px;cursor:pointer;color:var(--muted);font-size:.82rem;white-space:nowrap}
+.xl-tabs button[aria-pressed="true"]{background:var(--surface);color:var(--good);font-weight:600;box-shadow:inset 0 2px 0 var(--good)}
+.proof{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:16px;align-items:start}
+.proof img{width:100%;border-radius:10px;border:1px solid var(--line)}
+.match{font-family:var(--f-mono);font-size:.9rem;display:grid;gap:6px}
+.match div{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
+
+/* ---------- COMPARE ---------- */
+.vs th:nth-child(3),.vs td:nth-child(3){color:var(--fg)}
+.vs td:nth-child(3){font-weight:500}
+.finding{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start}
+.finding .big{font-family:var(--f-display);font-size:2.2rem;font-weight:800;color:var(--flare);line-height:1}
+
+footer{border-top:1px solid var(--line);padding-block:22px;color:var(--muted);font-size:.84rem}
+
+@media (max-width:960px){
+  .hero-in{grid-template-columns:1fr}
+  .stage{height:360px}
+  .builder{grid-template-columns:1fr}
+  .builder .side{position:static}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .bands{grid-template-columns:repeat(2,1fr)}
+  .proof{grid-template-columns:1fr}
+  .pipeline{grid-template-columns:repeat(2,1fr)}
+  .pipeline .st:nth-child(2)::after{display:none}
+}
+@media (max-width:560px){
+  .facts{grid-template-columns:repeat(2,1fr)}
+  .facts>div:nth-child(3){border-left:0}
+  .facts>div:nth-child(n+3){border-top:1px solid var(--line)}
+  .pipeline{grid-template-columns:1fr}
+  .pipeline .st::after{display:none}
+  .sunrise{width:280px;height:140px}
+  .hero-tag{display:none}
+}
+</style>
+</head>
+<body>
+
+
+<header class="top">
+  <div class="wrap topin">
+    <div class="brand"><svg viewBox="0 0 34 18" aria-hidden="true"><path d="M2 17a15 15 0 0 1 30 0z" fill="var(--flare)"/><path d="M7 17a10 10 0 0 1 20 0z" fill="var(--accent)"/><path d="M12 17a5 5 0 0 1 10 0z" fill="var(--sun)"/></svg>AFAQ</div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <a href="#mission" data-tab="mission" role="tab"><b>01</b>Mission</a>
+      <a href="#builder" data-tab="builder" role="tab"><b>02</b>Build a mission</a>
+      <a href="#schedule" data-tab="schedule" role="tab"><b>03</b>Optimal schedule</a>
+      <a href="#scenarios" data-tab="scenarios" role="tab"><b>04</b>Scenarios</a>
+      <a href="#model" data-tab="model" role="tab"><b>05</b>Model &amp; code</a>
+      <a href="#compare" data-tab="compare" role="tab"><b>06</b>Vs. prior work</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- ===================== 01 MISSION ===================== -->
+<section id="p-mission" data-panel="mission">
+  <div class="hero">
+    <canvas id="stars" aria-hidden="true"></canvas>
+    <div class="wrap hero-in">
+      <div>
+        <div class="ar"><span lang="ar" dir="rtl">أفق</span><span class="eyebrow" style="color:var(--sun)">horizon · Astronaut Fatigue-Aware Quantitative scheduling</span></div>
+        <h1>Give each task to the astronaut <span>rested enough</span> to do it.</h1>
+        <p class="lede">AFAQ reads each astronaut's sleep, heart rate and stress from a wearable band, scores their fatigue for every work block, and solves an integer program for the schedule with the lowest fatigue exposure. Every mission-critical task still gets done.</p>
+        <div class="cta">
+          <a class="btn primary" href="#builder">Build a mission →</a>
+          <a class="btn" href="#schedule">See today's optimal schedule</a>
+        </div>
+      </div>
+      <div class="stage" aria-label="AFAQ band concept, rotating">
+        <div class="sunrise"></div>
+        <div class="band3d">
+          <div class="strap t"></div><div class="strap b"></div>
+          <div class="pod"><div class="screen" id="heroScreen"></div></div>
+        </div>
+        <div class="hero-tag" style="top:40px;left:0" id="heroTag1"></div>
+        <div class="hero-tag" style="top:150px;right:0" id="heroTag2"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap" style="padding-block:36px 64px">
+    <div class="facts">
+      <div><div class="v num">~6 h</div><div class="k">average sleep per night for ISS crews, against an 8.5 h allowance (Barger et al., 2014)</div></div>
+      <div><div class="v num" id="factPeak">40.6%</div><div class="k">lower peak fatigue for the Commander after a 4-hour night (Scenario 2)</div></div>
+      <div><div class="v num" id="factGap">57%</div><div class="k">smaller workload gap between the busiest and least busy astronaut</div></div>
+      <div><div class="v num">100%</div><div class="k">of mission-critical tasks completed in every scenario</div></div>
+    </div>
+
+    <div style="margin-top:44px" class="panel-head">
+      <div><div class="eyebrow">How it works</div><h2>Band → Excel → Optimizer → Band</h2></div>
+    </div>
+    <div class="pipeline">
+      <div class="st"><div class="eyebrow">Sense</div><h3>Band vitals</h3><p>Sleep last night, wake-up time, resting heart rate vs. normal, stress score 0–100.</p></div>
+      <div class="st"><div class="eyebrow">Score</div><h3>Excel fatigue model</h3><p>A fatigue score per astronaut per work block. Cost of each assignment = difficulty × fatigue.</p></div>
+      <div class="st"><div class="eyebrow">Solve</div><h3>LINGO integer program</h3><p>Minimizes total fatigue + peak fatigue + workload gap, subject to skills, time windows, crew size and rest.</p></div>
+      <div class="st"><div class="eyebrow">Act</div><h3>Back to the band</h3><p>Each astronaut sees their next task, who they work with, and when they rest.</p></div>
+    </div>
+
+    <div class="grid2" style="margin-top:44px">
+      <div class="card" style="display:grid;gap:18px">
+        <div><div class="eyebrow">The problem</div>
+        <p style="margin-top:8px">Crew schedules are planned around fixed timelines and rarely adjust to how tired each astronaut actually is on the day. As missions to the Moon and Mars get longer and more autonomous, crews will need to re-plan on board. Existing tools mostly predict fatigue or plan sleep; few use fatigue to decide <em>who</em> does each task, and <em>when</em>.</p></div>
+        <p class="rq">How can we schedule astronaut tasks to reduce fatigue exposure and balance workload while meeting every mission requirement?</p>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Objectives</div>
+        <div class="obj-list" style="margin-top:12px">
+          <div><span class="n">01</span><p><b>Build the optimization model.</b> An integer program that assigns tasks to astronauts across time blocks, subject to deadlines, required skills, minimum sleep and a daily work limit. Solved in LINGO, data in Excel.</p></div>
+          <div><span class="n">02</span><p><b>Reduce fatigue exposure.</b> Minimize total and peak fatigue per astronaut, at least 13% below a manual first-available baseline whenever the crew has spare capacity.</p></div>
+          <div><span class="n">03</span><p><b>Balance workload, keep productivity.</b> Shrink the gap between the most and least loaded astronaut while completing 100% of mission-critical tasks. Checked with a sensitivity analysis on crew size and workday length.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:16px">
+      <div class="card"><div class="eyebrow">Team poster</div><img class="poster-thumb" src="poster.jpg" alt="AFAQ hackathon poster: introduction, methodology, results, innovation and conclusion" style="margin-top:12px" loading="lazy"></div>
+      <div class="card" style="display:grid;gap:14px;align-content:start">
+        <div class="eyebrow">Try it during the demo</div>
+        <ol style="margin:0;padding-left:20px;display:grid;gap:10px">
+          <li><b>Build a mission.</b> Start from a preset, then change the Commander's sleep, add a task or remove an astronaut.</li>
+          <li><b>Optimize.</b> The page solves the same integer program LINGO solves and proves the result is the global optimum.</li>
+          <li><b>Read the schedule.</b> Compare it to the manual baseline, then see what each astronaut's band would show.</li>
+          <li><b>Open the code.</b> The LINGO model is regenerated for your mission, ready to paste into LINGO.</li>
+        </ol>
+        <a class="btn primary" href="#builder" style="justify-self:start">Start with Scenario 2 →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 02 BUILDER ===================== -->
+<section id="p-builder" data-panel="builder" class="panel" hidden>
+  <div class="wrap">
+    <div class="panel-head">
+      <div><div class="eyebrow">02 · Mission builder</div><h2>Describe the flight day</h2>
+      <p>Every field feeds the Excel fatigue model and the integer program. Start from a preset and edit anything. The fatigue preview on the right updates as you type.</p></div>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <div class="builder">
+      <div>
+        <div class="step">
+          <div class="step-h"><h3><small>A</small>Mission &amp; work blocks</h3><button class="btn small" id="addBlock">+ Add block</button>
+          <p>Blocks are the time slots tasks can go into. Fatigue is measured at the middle of each block.</p></div>
+          <input class="mission-name" id="mName" type="text" aria-label="Mission name">
+          <div class="tbl-wrap" style="margin-top:12px"><table class="form" id="tBlocks"></table></div>
+        </div>
+
+        <div class="step">
+          <div class="step-h"><h3><small>B</small>Crew &amp; band readings</h3><button class="btn small" id="addCrew">+ Add astronaut</button>
+          <p>Simulated smartwatch readings. An astronaut is asleep in any block that starts before their wake-up time.</p></div>
+          <div class="tbl-wrap"><table class="form" id="tCrew"></table></div>
+        </div>
+
+        <div class="step">
+          <div class="step-h"><h3><small>C</small>Tasks required today</h3><button class="btn small" id="addTask">+ Add task</button>
+          <p>Difficulty 1–5. "Crew" is how many astronauts the task needs at once. Tick the blocks a task may use (its time window) and who is qualified to do it.</p></div>
+          <div class="tbl-wrap"><table class="form" id="tTasks"></table></div>
+        </div>
+
+        <div class="step">
+          <div class="step-h"><h3><small>D</small>Rules &amp; fatigue weights</h3>
+          <p>Fatigue = base + awake × hours awake + sleep × hours below target + HR × beats above normal + stress × score. These weights are team assumptions.</p></div>
+          <div class="rules" id="rules"></div>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="card">
+          <div class="eyebrow">Live fatigue preview</div>
+          <div style="margin-top:10px;overflow-x:auto"><table class="heat" id="heat"></table></div>
+          <p class="muted" style="font-size:.78rem;margin-top:8px">Fatigue score per block. Hatched = asleep or unavailable.</p>
+        </div>
+        <div class="card">
+          <div class="eyebrow">Model size</div>
+          <div class="kv" id="sizeKv" style="margin-top:10px"></div>
+          <div id="feasNote" style="margin-top:10px;font-size:.84rem"></div>
+          <button class="btn primary" id="runBtn" style="width:100%;justify-content:center;margin-top:14px">Optimize schedule →</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 03 SCHEDULE ===================== -->
+<section id="p-schedule" data-panel="schedule" class="panel" hidden>
+  <div class="wrap">
+    <div class="panel-head">
+      <div><div class="eyebrow">03 · Optimal schedule</div><h2 id="sName">Optimal schedule</h2>
+      <p id="sSub"></p></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span id="sStatus"></span><a class="btn small" href="#builder">Edit inputs</a></div>
+    </div>
+    <div class="presets" id="schedTabs" role="tablist" aria-label="Scenario" style="margin-bottom:18px"></div>
+    <div class="stale" id="stale"><span>Your Build a mission inputs have changed and are not optimized yet.</span><button class="btn small primary" id="reRun">Re-optimize</button></div>
+    <div id="sErr"></div>
+    <div id="sBody">
+      <div class="kpis" id="kpis"></div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+          <h3>Who does what, and when</h3>
+          <div class="seg" role="group" aria-label="Schedule view"><button id="vA" aria-pressed="true">AFAQ optimized</button><button id="vB" aria-pressed="false">Manual baseline</button></div>
+        </div>
+        <div class="sched-wrap"><table class="sched" id="sched"></table></div>
+        <div class="legend"><span><i class="sw afaq"></i>Assigned task (cost = difficulty × fatigue)</span><span><i class="sw moved"></i>Changed from the manual baseline</span><span>Baseline = first-available rule: earliest block, first qualified astronaut.</span></div>
+      </div>
+
+      <div class="grid2" style="margin-bottom:16px">
+        <div class="card chart"><h3>Fatigue exposure per astronaut</h3><p class="muted" style="font-size:.84rem;margin:4px 0 10px">Sum of difficulty × fatigue over assigned tasks. Dashed line = AFAQ peak.</p><div id="chF"></div>
+          <div class="legend"><span><i class="sw base"></i>Manual baseline</span><span><i class="sw afaq"></i>AFAQ</span></div></div>
+        <div class="card chart"><h3>Workload per astronaut</h3><p class="muted" style="font-size:.84rem;margin:4px 0 10px">Difficulty points assigned. A smaller spread means a fairer day.</p><div id="chL"></div>
+          <div class="legend"><span><i class="sw base"></i>Manual baseline</span><span><i class="sw afaq"></i>AFAQ</span></div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+          <div><h3>What the band shows</h3><p class="muted" style="font-size:.84rem">The optimized plan, pushed back to one astronaut's wrist.</p></div>
+          <label class="muted" style="font-size:.85rem;display:flex;gap:8px;align-items:center">Astronaut <select id="bandWho" style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px"></select></label>
+        </div>
+        <div class="bands" id="bands"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:10px">Solver report</h3>
+        <div class="report" id="report"></div>
+        <details class="vars"><summary>Show every decision variable</summary><div style="overflow-x:auto;margin-top:10px"><table class="vt" id="vt"></table></div></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 04 SCENARIOS ===================== -->
+<section id="p-scenarios" data-panel="scenarios" class="panel" hidden>
+  <div class="wrap">
+    <div class="panel-head">
+      <div><div class="eyebrow">04 · Scenarios &amp; sensitivity</div><h2>Five simulated flight days</h2>
+      <p>Results from the team's Excel and LINGO workbook. AFAQ helps most when one astronaut is badly rested and the crew has spare capacity. With a crew of three there is no slack, so the baseline is already optimal.</p></div>
+    </div>
+    <div class="grid2">
+      <div class="card chart"><h3>Peak fatigue of the most tired astronaut</h3><p class="muted" style="font-size:.84rem;margin:4px 0 10px">Fatigue exposure, lower is better.</p><div id="scP"></div>
+        <div class="legend"><span><i class="sw base"></i>Manual baseline</span><span><i class="sw afaq"></i>AFAQ</span></div></div>
+      <div class="card chart"><h3>Workload gap</h3><p class="muted" style="font-size:.84rem;margin:4px 0 10px">Difficulty points, busiest minus least busy astronaut.</p><div id="scG"></div>
+        <div class="legend"><span><i class="sw base"></i>Manual baseline</span><span><i class="sw afaq"></i>AFAQ</span></div></div>
+    </div>
+    <div class="card" style="margin-top:16px;overflow-x:auto">
+      <table class="data" id="scT"></table>
+    </div>
+    <div class="grid2" style="margin-top:16px">
+      <div class="card"><div class="eyebrow">Sensitivity</div><p style="margin-top:8px">A longer workday raised AFAQ's peak-fatigue gain in S4 (shifted sleep) from 14.3% to 25.4%: more blocks give the solver more room to move hard tasks away from tired astronauts. Cutting the crew to three (S5) removes that room entirely.</p></div>
+      <div class="card"><div class="eyebrow">Trade-off</div><p style="margin-top:8px">In some scenarios AFAQ accepts slightly more <em>total</em> fatigue to protect the most tired astronaut and balance workload. The objective weighs all three terms; change the weights in the builder to see the trade-off move.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 05 MODEL ===================== -->
+<section id="p-model" data-panel="model" class="panel" hidden>
+  <div class="wrap">
+    <div class="panel-head">
+      <div><div class="eyebrow">05 · Model &amp; code</div><h2>The math behind the schedule</h2>
+      <p>One integer program, written three ways: the formulation, the Excel workbook that builds its data, and the LINGO code that solves it. The browser solver on this page runs exactly the same model.</p></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card math">
+        <h3>Formulation</h3>
+        <div class="eq">x<sub>a,j,b</sub> ∈ {0,1} &nbsp;= 1 if astronaut a does task j in block b</div>
+        <div class="eq">min Z = Σ<sub>a</sub> F<sub>a</sub> + P + (L<sub>max</sub> − L<sub>min</sub>)</div>
+        <div class="eq">F<sub>a</sub> = Σ<sub>j,b</sub> d<sub>j</sub>·f<sub>a,b</sub>·x<sub>a,j,b</sub> &nbsp;&nbsp; L<sub>a</sub> = Σ<sub>j,b</sub> d<sub>j</sub>·x<sub>a,j,b</sub></div>
+        <dl>
+          <dt>Coverage</dt><dd>Σ<sub>a,b</sub> x<sub>a,j,b</sub> = crew<sub>j</sub> for every task (docking needs 2)</dd>
+          <dt>One at a time</dt><dd>Σ<sub>j</sub> x<sub>a,j,b</sub> ≤ 1 for every astronaut and block</dd>
+          <dt>Daily limit</dt><dd>Σ<sub>j,b</sub> x<sub>a,j,b</sub> ≤ max tasks per astronaut</dd>
+          <dt>Peak</dt><dd>F<sub>a</sub> ≤ P for every astronaut</dd>
+          <dt>Balance</dt><dd>L<sub>min</sub> ≤ L<sub>a</sub> ≤ L<sub>max</sub></dd>
+          <dt>Eligibility</dt><dd>x exists only if a is qualified, awake, and b is in task j's time window</dd>
+        </dl>
+        <div class="eq">f<sub>a,b</sub> = 1 + 0.1·awake + 0.15·sleep lost + 0.02·ΔHR + 0.004·stress</div>
+      </div>
+      <div class="card">
+        <h3>Proof: LINGO and this page agree</h3>
+        <p class="muted" style="font-size:.88rem;margin:6px 0 12px">Load the LINGO reference mission (the coefficients in the code below) and solve it here. Both solvers should report the same global optimum.</p>
+        <div class="match" id="match"></div>
+        <button class="btn primary" id="loadRef" style="margin-top:14px">Load LINGO reference &amp; solve</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="subtabs seg" role="group" aria-label="Code view" id="codeTabs">
+        <button data-c="ref" aria-pressed="true">LINGO · team model</button>
+        <button data-c="gen" aria-pressed="false">LINGO · generated for this mission</button>
+        <button data-c="xl" aria-pressed="false">Excel workbook</button>
+        <button data-c="run" aria-pressed="false">LINGO run</button>
+      </div>
+      <div id="c-ref" class="code"><div class="bar"><span>afaq_reference.lng · as written by the team</span><button class="btn small" data-copy="ref">Copy</button></div><pre id="preRef"></pre></div>
+      <div id="c-gen" class="code" hidden><div class="bar"><span id="genLab">afaq_mission.lng · rebuilt from your inputs</span><button class="btn small" data-copy="gen">Copy</button></div><pre id="preGen"></pre></div>
+      <div id="c-xl" hidden>
+        <p class="muted" style="font-size:.88rem;margin-bottom:10px">The workbook the team built in Excel, rebuilt live for the current mission. Click a coloured cell to see its formula. Copy a sheet and paste it straight into Excel.</p>
+        <div class="xl">
+          <div class="xl-fx"><span id="xlRef">A1</span><code id="xlFx"></code></div>
+          <div class="xl-grid" id="xlGrid"></div>
+          <div class="xl-tabs" id="xlTabs"></div>
+        </div>
+        <button class="btn small" data-copy="xl" style="margin-top:10px">Copy this sheet for Excel</button>
+      </div>
+      <div id="c-run" hidden>
+        <div class="proof">
+          <img src="lingo-run.jpg" alt="LINGO 22 solution report: Global optimal solution found, objective value 53.10, 40 variables, 29 integer, 40 constraints" loading="lazy">
+          <div style="display:grid;gap:10px;align-content:start">
+            <div class="eyebrow">LINGO/WIN64 22.0 · MILP</div>
+            <p>Global optimal solution found in 0.11 s and 38 iterations. Objective value <b class="mono">53.10</b>, objective bound 53.10, zero infeasibilities.</p>
+            <p class="muted">Fatigue F1–F4 = 9.8, 10.0, 12.0, 6.3. Peak P = 12. Workload L1–L4 = 6, 5, 8, 5, so the gap is 8 − 5 = 3.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 06 COMPARE ===================== -->
+<section id="p-compare" data-panel="compare" class="panel" hidden>
+  <div class="wrap">
+    <div class="panel-head">
+      <div><div class="eyebrow">06 · Versus prior work</div><h2>Circadian Stability (NASA Space Apps 2020) and AFAQ</h2>
+      <p>Circadian Stability was a Global Nominee for the Sleep Shift Scheduling Tool challenge. It plans one person's sleep, meals and exercise with weighted interval scheduling in Python. AFAQ takes the sleep period as given and decides who does each task, and when. The two tools complement each other.</p></div>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table class="data vs">
+        <thead><tr><th></th><th>Circadian Stability (Python)</th><th>AFAQ (Excel + LINGO)</th></tr></thead>
+        <tbody>
+          <tr><td class="muted">Who it schedules</td><td>1 person</td><td>The full crew (tested with 4, and with 3)</td></tr>
+          <tr><td class="muted">What it decides</td><td>Sleep, meal and exercise timing</td><td>Which astronaut does which task, in which block</td></tr>
+          <tr><td class="muted">Fatigue input</td><td>Distance from normal bedtime</td><td>Sleep, wake time, heart rate, stress (wearable band)</td></tr>
+          <tr><td class="muted">Constraints</td><td>No overlaps, limits on activity counts</td><td>Skills, crew size, time windows, sleep, daily task limit</td></tr>
+          <tr><td class="muted">Objective</td><td>One weighted score</td><td>Total fatigue + peak fatigue + workload gap</td></tr>
+          <tr><td class="muted">Optimal?</td><td>No. About 2% below its own best score in our test</td><td>Yes. Proven global optimum by LINGO and by full enumeration</td></tr>
+          <tr><td class="muted">Validation</td><td>None reported</td><td>Manual baseline plus 5 scenarios and a sensitivity analysis</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid2" style="margin-top:16px">
+      <div class="card finding"><div class="big">8 h</div><div><h3>Body-clock shift</h3><p class="muted" style="margin-top:6px">For a normal sleeper (23:00–07:00) with docking at 02:00–04:00, their tool moved sleep to 15:00–23:00. That shift is exactly what the tool aims to prevent.</p></div></div>
+      <div class="card finding"><div class="big">−2%</div><div><h3>Below its own optimum</h3><p class="muted" style="margin-top:6px">Under their own weights the best schedule scores 21,591 and keeps sleep at 23:00. Their algorithm returned 21,159. Loop-index and tag-limit bugs in the dynamic program cause the miss.</p></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="eyebrow">How we checked</div>
+      <p style="margin-top:8px">We ran their code from the public repository, then enumerated every option under their own scoring to find the true best. For AFAQ we enumerated all 152 feasible Scenario 2 schedules: LINGO's answer (Z = 62.14) is the minimum.</p>
+      <p style="margin-top:10px;font-size:.88rem">Sources: <a href="https://2020.spaceappschallenge.org/challenges/sustain/sleep-shift-scheduling-tool/teams/circadian-stability/" target="_blank" rel="noopener">Circadian Stability project page</a> · <a href="https://github.com/kevinfreyberg/NASA-Space-Apps-2020" target="_blank" rel="noopener">their code on GitHub</a></p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">AFAQ · space hackathon 2026. Smartwatch readings and fatigue weights are team assumptions for a demonstration case. References: Barger et al. (2014), <i>The Lancet Neurology</i>; Borbély (1982); NASA-STD-3001; Circadian Stability, NASA Space Apps 2020.</div></footer>
+
+<script type="text/plain" id="lingoRefSrc">MIN = F1 + F2 + F3 + F4 + P + LMAX - LMIN;
+! Fatigue exposure of each astronaut;
+F1 = 8.5*X112 + 5.2*X121 + 6.8*X122 + 1.3*X161 + 1.7*X162 + 2.1*X163;
+F2 = 10.0*X212 + 6.4*X221 + 8.0*X222 + 1.6*X261 + 2.0*X262 + 2.4*X263;
+F3 = 5.2*X321 + 6.8*X322 + 5.2*X331 + 6.8*X332 + 8.4*X333 + 3.9*X341 + 5.1*X342 + 6.3*X343 + 1.3*X361 + 1.7*X362 + 2.1*X363;
+F4 = 3.3*X442 + 4.5*X443 + 2.2*X452 + 3.0*X453 + 1.1*X462 + 1.5*X463;
+! Workload of each astronaut (difficulty points);
+L1 = 5*X112 + 4*X121 + 4*X122 + 1*X161 + 1*X162 + 1*X163;
+L2 = 5*X212 + 4*X221 + 4*X222 + 1*X261 + 1*X262 + 1*X263;
+L3 = 4*X321 + 4*X322 + 4*X331 + 4*X332 + 4*X333 + 3*X341 + 3*X342 + 3*X343 + 1*X361 + 1*X362 + 1*X363;
+L4 = 3*X442 + 3*X443 + 2*X452 + 2*X453 + 1*X462 + 1*X463;
+! 1. Every task is completed (docking needs 2 astronauts);
+X112 + X212 = 2;
+X121 + X122 + X221 + X222 + X321 + X322 = 1;
+X331 + X332 + X333 = 1;
+X341 + X342 + X343 + X442 + X443 = 1;
+X452 + X453 = 1;
+X161 + X162 + X163 + X261 + X262 + X263 + X361 + X362 + X363 + X462 + X463 = 1;
+! 2. One task per astronaut per block;
+X121 + X161 <= 1;
+X112 + X122 + X162 <= 1;
+X221 + X261 <= 1;
+X212 + X222 + X262 <= 1;
+X321 + X331 + X341 + X361 <= 1;
+X322 + X332 + X342 + X362 <= 1;
+X333 + X343 + X363 <= 1;
+X442 + X452 + X462 <= 1;
+X443 + X453 + X463 <= 1;
+! 3. Daily work limit: at most 2 tasks per astronaut;
+X112 + X121 + X122 + X161 + X162 + X163 <= 2;
+X212 + X221 + X222 + X261 + X262 + X263 <= 2;
+X321 + X322 + X331 + X332 + X333 + X341 + X342 + X343 + X361 + X362 + X363 <= 2;
+X442 + X443 + X452 + X453 + X462 + X463 <= 2;
+! 4. Peak fatigue;
+F1 <= P;
+F2 <= P;
+F3 <= P;
+F4 <= P;
+! 5. Workload balance;
+L1 <= LMAX;
+L2 <= LMAX;
+L3 <= LMAX;
+L4 <= LMAX;
+L1 >= LMIN;
+L2 >= LMIN;
+L3 >= LMIN;
+L4 >= LMIN;
+! Binary variables;
+@BIN(X112); @BIN(X121); @BIN(X122); @BIN(X161); @BIN(X162); @BIN(X163);
+@BIN(X212); @BIN(X221); @BIN(X222); @BIN(X261); @BIN(X262); @BIN(X263);
+@BIN(X321); @BIN(X322); @BIN(X331); @BIN(X332); @BIN(X333); @BIN(X341); @BIN(X342); @BIN(X343); @BIN(X361); @BIN(X362); @BIN(X363);
+@BIN(X442); @BIN(X443); @BIN(X452); @BIN(X453); @BIN(X462); @BIN(X463);</script>
+
+<script>
+//@@CORE
+/* ---------- presets ---------- */
+const STD_TASKS = [
+  {name:"Docking support", diff:5, crew:2, blocks:[0,1,0], qual:[1,1,0,0]},
+  {name:"EVA prep",        diff:4, crew:1, blocks:[1,1,0], qual:[1,1,1,0]},
+  {name:"Robotic arm ops", diff:4, crew:1, blocks:[1,1,1], qual:[0,0,1,0]},
+  {name:"Science experiment", diff:3, crew:1, blocks:[1,1,1], qual:[0,0,1,1]},
+  {name:"Medical check",   diff:2, crew:1, blocks:[1,1,1], qual:[0,0,0,1]},
+  {name:"Maintenance",     diff:1, crew:1, blocks:[1,1,1], qual:[1,1,1,1]},
+];
+const STD_BLOCKS = [{start:8,end:10},{start:12,end:14},{start:16,end:18}];
+const STD_RULES = {maxTasks:2, sleepTarget:8, wT:1, wP:1, wG:1, cBase:1, cAwake:0.1, cSleep:0.15, cHR:0.02, cStress:0.004};
+const PRESETS = {
+  s2: {label:"S2 · Commander slept 4 h", mission:{name:"Scenario 2 · Commander slept 4 h before docking",
+    blocks:STD_BLOCKS, rules:STD_RULES, tasks:STD_TASKS,
+    crew:[
+      {name:"Commander", avail:1, sleep:4, wake:6, hr:70, hrN:60, stress:60},
+      {name:"Pilot", avail:1, sleep:7, wake:6, hr:66, hrN:64, stress:30},
+      {name:"Robotics specialist", avail:1, sleep:7.5, wake:6, hr:58, hrN:58, stress:20},
+      {name:"Science/medical specialist", avail:1, sleep:8, wake:12, hr:63, hrN:62, stress:20},
+    ]}},
+  lingo: {label:"LINGO reference run", mission:{name:"LINGO reference mission",
+    blocks:STD_BLOCKS, rules:STD_RULES, tasks:STD_TASKS,
+    crew:[
+      {name:"Commander", avail:1, sleep:8, wake:6, hr:60, hrN:60, stress:0},
+      {name:"Pilot", avail:1, sleep:6, wake:6, hr:64, hrN:64, stress:0},
+      {name:"Robotics specialist", avail:1, sleep:8, wake:6, hr:58, hrN:58, stress:0},
+      {name:"Science/medical specialist", avail:1, sleep:8, wake:12, hr:62, hrN:62, stress:0},
+    ]}},
+  lunar: {label:"Lunar sortie · 5 crew (example)", mission:{name:"Lunar surface sortie day (example mission)",
+    blocks:[{start:7,end:9},{start:10,end:12},{start:14,end:16},{start:18,end:20}],
+    rules:{...STD_RULES, maxTasks:2},
+    crew:[
+      {name:"Commander", avail:1, sleep:5.5, wake:5, hr:68, hrN:61, stress:55},
+      {name:"Pilot", avail:1, sleep:7, wake:5, hr:63, hrN:62, stress:25},
+      {name:"Geologist", avail:1, sleep:6.5, wake:5, hr:66, hrN:60, stress:40},
+      {name:"Flight engineer", avail:1, sleep:8, wake:9, hr:59, hrN:59, stress:15},
+      {name:"Medical officer", avail:1, sleep:7.5, wake:9, hr:61, hrN:60, stress:20},
+    ],
+    tasks:[
+      {name:"Rover EVA traverse", diff:5, crew:2, blocks:[0,1,1,0], qual:[1,1,1,0,0]},
+      {name:"Airlock & suit check", diff:3, crew:1, blocks:[1,1,0,0], qual:[1,1,0,1,0]},
+      {name:"Sample curation", diff:3, crew:1, blocks:[0,0,1,1], qual:[0,0,1,0,1]},
+      {name:"Earth comms window", diff:2, crew:1, blocks:[0,0,1,0], qual:[1,1,0,1,0]},
+      {name:"Life-support maintenance", diff:3, crew:1, blocks:[1,1,1,1], qual:[0,0,0,1,0]},
+      {name:"Post-EVA medical check", diff:2, crew:1, blocks:[0,0,1,1], qual:[0,0,0,0,1]},
+      {name:"Habitat housekeeping", diff:1, crew:1, blocks:[1,1,1,1], qual:[1,1,1,1,1]},
+    ]}},
+};
+const clone = o => JSON.parse(JSON.stringify(o));
+const r2 = v => Math.round(v*100)/100;
+const mid = b => (b.start+b.end)/2;
+const fmtH = h => { const hh=Math.floor(h), mm=Math.round((h-hh)*60); return String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0"); };
+
+function fatigue(M,a,b){
+  const c=M.crew[a], R=M.rules, m=mid(M.blocks[b]);
+  if(!c.avail || m <= c.wake) return null;
+  return r2(R.cBase + R.cAwake*(m-c.wake) + R.cSleep*Math.max(0,R.sleepTarget-c.sleep) + R.cHR*Math.max(0,c.hr-c.hrN) + R.cStress*c.stress);
+}
+function buildVars(M){
+  const vars=[];
+  M.tasks.forEach((t,j)=>M.blocks.forEach((bl,b)=>M.crew.forEach((c,a)=>{
+    if(!t.blocks[b]||!t.qual[a]) return;
+    const f=fatigue(M,a,b); if(f===null) return;
+    vars.push({a,j,b,f,diff:t.diff,cost:r2(t.diff*f),cc:Math.round(t.diff*f*100)});
+  })));
+  return vars;
+}
+function varName(M,v){
+  const big = M.crew.length>9||M.tasks.length>9||M.blocks.length>9;
+  return big?`X_${v.a+1}_${v.j+1}_${v.b+1}`:`X${v.a+1}${v.j+1}${v.b+1}`;
+}
+function combos(arr,k){const out=[];const rec=(s,acc)=>{if(acc.length===k){out.push(acc.slice());return}for(let i=s;i<arr.length;i++){acc.push(arr[i]);rec(i+1,acc);acc.pop()}};rec(0,[]);return out}
+
+function optionsFor(M,vars){
+  const byKey={}; vars.forEach(v=>byKey[v.a+"|"+v.j+"|"+v.b]=v);
+  return M.tasks.map((t,j)=>{
+    const opts=[];
+    M.blocks.forEach((_,b)=>{
+      const el=M.crew.map((c,a)=>byKey[a+"|"+j+"|"+b]?a:-1).filter(a=>a>=0);
+      combos(el,t.crew).forEach(cr=>opts.push({j,b,crew:cr,cc:cr.reduce((s,a)=>s+byKey[a+"|"+j+"|"+b].cc,0)}));
+    });
+    opts.sort((x,y)=>x.cc-y.cc);
+    return opts;
+  });
+}
+function metrics(M,assign){
+  const n=M.crew.length, F=Array(n).fill(0), L=Array(n).fill(0), N=Array(n).fill(0);
+  assign.forEach(o=>o.crew.forEach(a=>{const f=fatigue(M,a,o.b);F[a]+=M.tasks[o.j].diff*f;L[a]+=M.tasks[o.j].diff;N[a]++;}));
+  const av=M.crew.map((c,a)=>c.avail?a:-1).filter(a=>a>=0);
+  const Fr=F.map(r2), total=r2(Fr.reduce((s,x)=>s+x,0)), peak=Math.max(...av.map(a=>Fr[a]));
+  const Lmax=Math.max(...av.map(a=>L[a])), Lmin=Math.min(...av.map(a=>L[a]));
+  const R=M.rules, Z=r2(R.wT*total+R.wP*peak+R.wG*(Lmax-Lmin));
+  return {F:Fr,L,N,total,peak:r2(peak),Lmax,Lmin,gap:Lmax-Lmin,Z};
+}
+function baseline(M,vars){
+  const opts=optionsFor(M,vars); const n=M.crew.length, B=M.blocks.length;
+  const busy=Array.from({length:n},()=>Array(B).fill(false)), cnt=Array(n).fill(0), out=[];
+  for(let j=0;j<M.tasks.length;j++){
+    let done=false;
+    for(let b=0;b<B&&!done;b++){
+      const el=[...new Set(opts[j].filter(o=>o.b===b).flatMap(o=>o.crew))].sort((x,y)=>x-y).filter(a=>!busy[a][b]&&cnt[a]<M.rules.maxTasks);
+      if(el.length>=M.tasks[j].crew){const cr=el.slice(0,M.tasks[j].crew);cr.forEach(a=>{busy[a][b]=true;cnt[a]++});out.push({j,b,crew:cr});done=true;}
+    }
+    if(!done) return null;
+  }
+  return out;
+}
+function solve(M){
+  const t0=(typeof performance!=="undefined"?performance:Date).now();
+  const vars=buildVars(M), opts=optionsFor(M,vars), n=M.crew.length, B=M.blocks.length, R=M.rules;
+  const av=M.crew.map((c,a)=>c.avail?a:-1).filter(a=>a>=0);
+  const empty=opts.map((o,j)=>o.length?null:j).filter(x=>x!==null);
+  if(!av.length) return {status:"infeasible",reason:"No astronaut is available.",vars};
+  if(empty.length) return {status:"infeasible",reason:"No qualified, awake astronaut can do: "+empty.map(j=>M.tasks[j].name).join(", ")+". Check its time window, crew size and qualifications.",vars};
+  const order=opts.map((o,j)=>j).sort((x,y)=>opts[x].length-opts[y].length);
+  const minRem=Array(order.length+1).fill(0);
+  for(let k=order.length-1;k>=0;k--) minRem[k]=minRem[k+1]+opts[order[k]][0].cc;
+  const busy=Array.from({length:n},()=>Array(B).fill(false)), cnt=Array(n).fill(0), Fc=Array(n).fill(0), L=Array(n).fill(0);
+  let best=Infinity, bestPick=null, ties=0, nodes=0, leaves=0, limit=4e6, hit=false; const pick=Array(order.length);
+  const EPS=1e-7;
+  function lb(k,sumC){
+    let mx=0; for(const a of av) if(Fc[a]>mx) mx=Fc[a];
+    const rem=sumC+minRem[k];
+    return (R.wT*rem + R.wP*Math.max(mx,rem/av.length))/100;
+  }
+  function dfs(k,sumC){
+    if(++nodes>limit){hit=true;return}
+    if(k===order.length){
+      leaves++;
+      let mx=0,Lx=-1e9,Ln=1e9; for(const a of av){if(Fc[a]>mx)mx=Fc[a]; if(L[a]>Lx)Lx=L[a]; if(L[a]<Ln)Ln=L[a];}
+      const z=(R.wT*sumC+R.wP*mx)/100 + R.wG*(Lx-Ln);
+      if(z<best-EPS){best=z;bestPick=pick.slice();ties=1}else if(Math.abs(z-best)<=EPS) ties++;
+      return;
+    }
+    if(lb(k,sumC)>best+EPS) return;
+    const j=order[k], d=M.tasks[j].diff;
+    for(const o of opts[j]){
+      let ok=true; for(const a of o.crew){if(busy[a][o.b]||cnt[a]>=R.maxTasks){ok=false;break}}
+      if(!ok) continue;
+      for(const a of o.crew){busy[a][o.b]=true;cnt[a]++;L[a]+=d;Fc[a]+=Math.round(d*fatigue(M,a,o.b)*100)}
+      pick[k]=o; dfs(k+1,sumC+o.cc);
+      for(const a of o.crew){busy[a][o.b]=false;cnt[a]--;L[a]-=d;Fc[a]-=Math.round(d*fatigue(M,a,o.b)*100)}
+      if(hit) return;
+    }
+  }
+  dfs(0,0);
+  const ms=(typeof performance!=="undefined"?performance:Date).now()-t0;
+  if(!bestPick) return {status:"infeasible",reason:"Every task has candidates, but no schedule satisfies all rules together. Try raising the daily task limit, widening time windows or qualifying more crew.",vars,nodes,ms};
+  const assign=bestPick.map(o=>({j:o.j,b:o.b,crew:o.crew.slice()})).sort((x,y)=>x.j-y.j);
+  const blRows=[];M.crew.forEach((c,a)=>M.blocks.forEach((_,b)=>{const k=vars.filter(v=>v.a===a&&v.b===b).length;if(k>=2)blRows.push(1)}));
+  const nav=av.length;
+  const size={binaries:vars.length, total:vars.length+2*nav+3, cons:2*nav+M.tasks.length+blRows.length+nav+nav+2*nav+1};
+  return {status:hit?"limit":"optimal",assign,vars,nodes,leaves,ties,ms,m:metrics(M,assign),size};
+}
+//@@END
+</script>
+
+<script>
+/* ---------- state ---------- */
+let M = clone(PRESETS.s2.mission), preset="s2", RES=null, BASE=null, solvedSig=null, view="A", CACHE={}, SK="s2";
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const sig = () => JSON.stringify(M);
+const short = (a) => "A"+(a+1);
+
+/* ---------- tabs ---------- */
+const TABS=["mission","builder","schedule","scenarios","model","compare"];
+function show(tab){
+  if(!TABS.includes(tab)) tab="mission";
+  document.querySelectorAll("[data-panel]").forEach(p=>p.hidden=p.dataset.panel!==tab);
+  document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-selected",a.dataset.tab===tab));
+  if(tab==="schedule") updateStale();
+  window.scrollTo({top:0});
+}
+document.addEventListener("click",e=>{
+  const a=e.target.closest('a[href^="#"]'); if(!a) return;
+  const t=a.getAttribute("href").slice(1); if(!TABS.includes(t)) return;
+  e.preventDefault(); show(t); try{history.replaceState(null,"","#"+t)}catch(_){}
+});
+window.addEventListener("hashchange",()=>show(location.hash.slice(1)));
+
+/* ---------- builder ---------- */
+function renderPresets(){
+  $("#presets").innerHTML=Object.entries(PRESETS).map(([k,p])=>`<button class="btn small ${k===preset?"on":""}" data-preset="${k}">${esc(p.label)}</button>`).join("");
+}
+function numIn(path,val,step,min,max,w){return `<input type="number" id="in-${path.replace(/\./g,"-")}" data-k="${path}" value="${val}" step="${step}" ${min!==undefined?`min="${min}"`:""} ${max!==undefined?`max="${max}"`:""} style="${w?`width:${w}px`:""}">`}
+function renderBuilder(){
+  renderPresets();
+  $("#mName").value=M.name;
+  $("#tBlocks").innerHTML=`<tr><th>Block</th><th>Start (h)</th><th>End (h)</th><th>Measured at</th><th></th></tr>`+
+    M.blocks.map((b,i)=>`<tr><td class="tag">B${i+1}</td><td>${numIn(`blocks.${i}.start`,b.start,0.5,0,24,90)}</td><td>${numIn(`blocks.${i}.end`,b.end,0.5,0,24,90)}</td><td class="mono muted">${fmtH(mid(b))}</td><td>${M.blocks.length>1?`<button class="x" data-del="blocks.${i}" aria-label="Remove block B${i+1}">×</button>`:""}</td></tr>`).join("");
+  $("#tCrew").innerHTML=`<tr><th>#</th><th>Astronaut / role</th><th>On duty</th><th>Sleep (h)</th><th>Wake-up (h)</th><th>Resting HR</th><th>Normal HR</th><th>Stress 0–100</th><th></th></tr>`+
+    M.crew.map((c,i)=>`<tr><td class="tag">A${i+1}</td><td><input type="text" id="in-crew-${i}-name" data-k="crew.${i}.name" value="${esc(c.name)}"></td>
+      <td><input type="checkbox" id="in-crew-${i}-avail" data-k="crew.${i}.avail" ${c.avail?"checked":""} aria-label="A${i+1} on duty"></td>
+      <td>${numIn(`crew.${i}.sleep`,c.sleep,0.5,0,12,70)}</td><td>${numIn(`crew.${i}.wake`,c.wake,0.5,0,23.5,70)}</td>
+      <td>${numIn(`crew.${i}.hr`,c.hr,1,30,150,70)}</td><td>${numIn(`crew.${i}.hrN`,c.hrN,1,30,150,70)}</td><td>${numIn(`crew.${i}.stress`,c.stress,5,0,100,70)}</td>
+      <td>${M.crew.length>1?`<button class="x" data-del="crew.${i}" aria-label="Remove A${i+1}">×</button>`:""}</td></tr>`).join("");
+  $("#tTasks").innerHTML=`<tr><th>#</th><th>Task</th><th>Difficulty</th><th>Crew</th><th>Allowed blocks</th><th>Qualified astronauts</th><th></th></tr>`+
+    M.tasks.map((t,j)=>`<tr><td class="tag">T${j+1}</td><td><input type="text" id="in-tasks-${j}-name" data-k="tasks.${j}.name" value="${esc(t.name)}"></td>
+      <td>${numIn(`tasks.${j}.diff`,t.diff,1,1,5,60)}</td><td>${numIn(`tasks.${j}.crew`,t.crew,1,1,3,56)}</td>
+      <td>${M.blocks.map((_,b)=>`<label class="chk"><input type="checkbox" id="in-tasks-${j}-blocks-${b}" data-k="tasks.${j}.blocks.${b}" ${t.blocks[b]?"checked":""}>B${b+1}</label>`).join("")}</td>
+      <td>${M.crew.map((c,a)=>`<label class="chk" title="${esc(c.name)}"><input type="checkbox" id="in-tasks-${j}-qual-${a}" data-k="tasks.${j}.qual.${a}" ${t.qual[a]?"checked":""}>A${a+1}</label>`).join("")}</td>
+      <td>${M.tasks.length>1?`<button class="x" data-del="tasks.${j}" aria-label="Remove task T${j+1}">×</button>`:""}</td></tr>`).join("");
+  const R=M.rules, f=(k,lab,step,min,max)=>`<label>${lab}${numIn("rules."+k,R[k],step,min,max)}</label>`;
+  $("#rules").innerHTML=f("maxTasks","Max tasks per astronaut",1,1,6)+f("sleepTarget","Sleep target (h)",0.5,4,10)+
+    f("wT","Weight · total fatigue",0.5,0,10)+f("wP","Weight · peak fatigue",0.5,0,10)+f("wG","Weight · workload gap",0.5,0,10)+
+    f("cBase","Fatigue base",0.1,0,5)+f("cAwake","per hour awake",0.01,0,1)+f("cSleep","per hour of sleep lost",0.01,0,1)+f("cHR","per bpm above normal",0.005,0,1)+f("cStress","per stress point",0.001,0,1);
+  renderPreview();
+}
+function renderPreview(){
+  let h=`<tr><th></th>${M.blocks.map((b,i)=>`<th>B${i+1}<br>${fmtH(b.start)}</th>`).join("")}</tr>`;
+  let mx=0; M.crew.forEach((_,a)=>M.blocks.forEach((_,b)=>{const f=fatigue(M,a,b);if(f>mx)mx=f}));
+  h+=M.crew.map((c,a)=>`<tr><th title="${esc(c.name)}">A${a+1}</th>${M.blocks.map((_,b)=>{const f=fatigue(M,a,b);
+    if(f===null) return `<td class="asleep">${c.avail?"asleep":"off"}</td>`;
+    const t=Math.min(1,Math.max(0,(f-1)/Math.max(1,mx-1)));
+    return `<td style="background:color-mix(in srgb,var(--flare) ${Math.round(12+t*60)}%,var(--surface-2))">${f.toFixed(2)}</td>`}).join("")}</tr>`).join("");
+  $("#heat").innerHTML=h;
+  const vars=buildVars(M), opts=optionsFor(M,vars), nav=M.crew.filter(c=>c.avail).length;
+  const need=M.tasks.reduce((s,t)=>s+t.crew,0), cap=nav*M.rules.maxTasks;
+  $("#sizeKv").innerHTML=`<span>Binary variables x<sub>a,j,b</sub></span><span>${vars.length}</span><span>Astronauts on duty</span><span>${nav}</span><span>Crew-slots needed</span><span>${need}</span><span>Crew capacity (on duty × limit)</span><span>${cap}</span>`;
+  const empty=opts.map((o,j)=>o.length?null:M.tasks[j].name).filter(Boolean);
+  $("#feasNote").innerHTML= empty.length?`<span class="pill bad"><i class="dot"></i>No eligible crew: ${esc(empty.join(", "))}</span>`:
+    need>cap?`<span class="pill bad"><i class="dot"></i>Needs ${need} crew-slots, capacity is ${cap}</span>`:
+    `<span class="pill ok"><i class="dot"></i>Every task has eligible crew</span>`;
+  updateStale();
+}
+function setPath(path,val){const ks=path.split(".");let o=M;for(let i=0;i<ks.length-1;i++)o=o[ks[i]];o[ks[ks.length-1]]=val}
+document.addEventListener("input",e=>{
+  const el=e.target; if(el.id==="mName"){M.name=el.value;return}
+  if(!el.dataset.k) return;
+  let v; if(el.type==="checkbox") v=el.checked?1:0; else if(el.type==="number"){v=parseFloat(el.value); if(isNaN(v)) return;} else v=el.value;
+  if(el.dataset.k.endsWith(".crew")&&el.dataset.k.startsWith("tasks")) v=Math.max(1,Math.min(3,Math.round(v)));
+  setPath(el.dataset.k,v); preset=null; renderPresets(); renderPreview();
+});
+document.addEventListener("change",e=>{ if(e.target.type==="checkbox"&&e.target.dataset.k) {/* handled by input */} });
+document.addEventListener("click",e=>{
+  const p=e.target.closest("[data-preset]"); if(p){loadPreset(p.dataset.preset);return}
+  const d=e.target.closest("[data-del]"); if(d){
+    const [kind,iS]=d.dataset.del.split("."), i=+iS;
+    M[kind].splice(i,1);
+    if(kind==="blocks") M.tasks.forEach(t=>t.blocks.splice(i,1));
+    if(kind==="crew") M.tasks.forEach(t=>t.qual.splice(i,1));
+    preset=null; renderBuilder(); return;
+  }
+});
+$("#addBlock").onclick=()=>{ if(M.blocks.length>=6) return; const last=M.blocks[M.blocks.length-1]; const s=Math.min(22,last.end+2); M.blocks.push({start:s,end:Math.min(24,s+2)}); M.tasks.forEach(t=>t.blocks.push(1)); preset=null; renderBuilder(); };
+$("#addCrew").onclick=()=>{ if(M.crew.length>=7) return; M.crew.push({name:"Mission specialist",avail:1,sleep:7.5,wake:6,hr:62,hrN:62,stress:20}); M.tasks.forEach((t,j)=>t.qual.push(t.diff<=2?1:0)); preset=null; renderBuilder(); };
+$("#addTask").onclick=()=>{ if(M.tasks.length>=9) return; M.tasks.push({name:"New task",diff:2,crew:1,blocks:M.blocks.map(()=>1),qual:M.crew.map(()=>1)}); preset=null; renderBuilder(); };
+function loadPreset(k){ preset=k; M=clone(PRESETS[k].mission); renderBuilder(); }
+
+/* ---------- solve & render ---------- */
+function run(goto=true){
+  $("#runBtn").textContent="Solving…";
+  setTimeout(()=>{
+    const k=keyOf(M); CACHE[k]=solveEntry(M); RES=CACHE[k].RES; BASE=CACHE[k].BASE; solvedSig=sig(); SK=k;
+    renderSchedule(); renderCode(); renderMatch();
+    $("#runBtn").textContent="Optimize schedule →";
+    if(goto){show("schedule"); try{history.replaceState(null,"","#schedule")}catch(_){}}
+  },30);
+}
+$("#runBtn").onclick=()=>run(true);
+$("#reRun").onclick=()=>run(true);
+$("#vA").onclick=()=>{view="A";renderSchedule()};
+$("#vB").onclick=()=>{view="B";renderSchedule()};
+$("#bandWho").onchange=()=>withView(renderBands);
+
+function pct(b,a){ if(!b) return null; return r2((b-a)/b*100); }
+function delta(b,a,unit=""){
+  const p=pct(b,a); if(p===null) return `<div class="d flat">no baseline</div>`;
+  if(Math.abs(p)<0.05) return `<div class="d flat">same as baseline (${b}${unit})</div>`;
+  return `<div class="d ${p>0?"up":"down"}">${p>0?"▼ "+p.toFixed(1)+"% lower":"▲ "+(-p).toFixed(1)+"% higher"} than baseline ${b}${unit}</div>`;
+}
+function keyOf(Mx){const j=JSON.stringify(Mx);for(const k in PRESETS) if(JSON.stringify(PRESETS[k].mission)===j) return k;return "custom";}
+function solveEntry(Mx){const Rr=solve(Mx);const b=baseline(Mx,buildVars(Mx));return {M:clone(Mx),RES:Rr,BASE:b?{assign:b,m:metrics(Mx,b)}:null,sig:JSON.stringify(Mx)};}
+function updateStale(){const st=$("#stale");if(!st)return;const k=keyOf(M);st.classList.toggle("show",!CACHE[k]||CACHE[k].sig!==sig());}
+function withView(fn){if(!CACHE[SK]) CACHE[SK]=solveEntry(PRESETS[SK].mission);const v=CACHE[SK],sM=M,sR=RES,sB=BASE;M=v.M;RES=v.RES;BASE=v.BASE;try{fn()}finally{M=sM;RES=sR;BASE=sB}}
+function renderSchedTabs(){
+  const keys=[...Object.keys(PRESETS),...(CACHE.custom?["custom"]:[])];
+  $("#schedTabs").innerHTML=keys.map(k=>{const e=CACHE[k];const z=e&&e.RES&&e.RES.m?` · Z ${e.RES.m.Z.toFixed(2)}`:"";
+    return `<button class="btn small ${k===SK?"on":""}" role="tab" aria-selected="${k===SK}" data-sk="${k}">${esc(k==="custom"?"Your mission":PRESETS[k].label)}<span class="mono muted" style="font-size:.75rem">${z}</span></button>`}).join("");
+}
+document.addEventListener("click",e=>{const b=e.target.closest("[data-sk]");if(!b)return;SK=b.dataset.sk;renderSchedule();});
+function renderSchedule(){withView(renderScheduleInner);renderSchedTabs();updateStale();}
+function renderScheduleInner(){
+  $("#sName").textContent=M.name;
+  if(!RES){return}
+  if(RES.status==="infeasible"){
+    $("#sErr").innerHTML=`<div class="errbox"><b>No feasible schedule.</b> ${esc(RES.reason)}</div>`; $("#sBody").hidden=true;
+    $("#sStatus").innerHTML=`<span class="pill bad"><i class="dot"></i>Infeasible</span>`; $("#sSub").textContent=""; return;
+  }
+  $("#sErr").innerHTML=""; $("#sBody").hidden=false;
+  const m=RES.m, bm=BASE&&BASE.m;
+  $("#sStatus").innerHTML=RES.status==="optimal"?`<span class="pill ok"><i class="dot"></i>Global optimum · Z = ${m.Z.toFixed(2)}</span>`:`<span class="pill warn"><i class="dot"></i>Search limit · best Z = ${m.Z.toFixed(2)}</span>`;
+  const tired=m.F.indexOf(m.peak);
+  $("#sSub").textContent=`${M.crew.filter(c=>c.avail).length} astronauts, ${M.tasks.length} tasks, ${M.blocks.length} blocks. ${RES.ties>1?RES.ties+" schedules tie for the optimum; one is shown.":"This schedule is the unique optimum."}`;
+  $("#kpis").innerHTML=`
+    <div class="kpi"><div class="k">Peak fatigue (most tired: ${esc(M.crew[tired].name)})</div><div class="v">${m.peak.toFixed(2)}</div>${delta(bm&&bm.peak,m.peak)}</div>
+    <div class="kpi"><div class="k">Workload gap (busiest − least busy)</div><div class="v">${m.gap}</div>${delta(bm&&bm.gap,m.gap," pts")}</div>
+    <div class="kpi"><div class="k">Total fatigue exposure</div><div class="v">${m.total.toFixed(2)}</div>${delta(bm&&bm.total,m.total)}</div>
+    <div class="kpi"><div class="k">Mission tasks completed</div><div class="v">100%</div><div class="d flat">${M.tasks.length} of ${M.tasks.length}, objective Z ${bm?bm.Z.toFixed(2)+" → ":""}${m.Z.toFixed(2)}</div></div>`;
+  $("#vA").setAttribute("aria-pressed",view==="A"); $("#vB").setAttribute("aria-pressed",view==="B");
+  const show_=view==="A"?RES.assign:(BASE?BASE.assign:[]);
+  const other=view==="A"?(BASE?BASE.assign:[]):RES.assign;
+  const cellOf=(as,a,b)=>as.find(o=>o.b===b&&o.crew.includes(a));
+  let h=`<tr><th class="who">Astronaut</th>${M.blocks.map((b,i)=>`<th>B${i+1} · ${fmtH(b.start)}–${fmtH(b.end)}</th>`).join("")}</tr>`;
+  const mm=view==="A"?m:bm;
+  h+=M.crew.map((c,a)=>`<tr><th class="who"><b>${esc(c.name)}</b><span class="mono muted">A${a+1} · slept ${c.sleep} h · F = ${mm?mm.F[a].toFixed(2):"–"}</span></th>${M.blocks.map((_,b)=>{
+    const f=fatigue(M,a,b);
+    if(f===null) return `<td><div class="cell sleep">${c.avail?"Asleep":"Off duty"}</div></td>`;
+    const o=cellOf(show_,a,b), o2=cellOf(other,a,b);
+    const moved = (o?o.j:-1)!==(o2?o2.j:-1);
+    if(!o) return `<td><div class="cell rest ${moved&&BASE?"moved":""}">Rest<br><span class="mono" style="font-size:.72rem">fatigue ${f.toFixed(2)}</span></div></td>`;
+    const t=M.tasks[o.j], mates=o.crew.filter(x=>x!==a);
+    return `<td><div class="cell task ${f>=2.2&&t.diff>=4?"hot":""} ${moved&&BASE?"moved":""}"><b>${esc(t.name)}</b><i>d${t.diff} × ${f.toFixed(2)} = ${r2(t.diff*f).toFixed(2)}${mates.length?" · with "+mates.map(short).join(", "):""}</i></div></td>`;
+  }).join("")}</tr>`).join("");
+  $("#sched").innerHTML=h;
+  const names=M.crew.map((c,a)=>`A${a+1} ${c.name}`);
+  const avIdx=M.crew.map((c,a)=>c.avail?a:-1).filter(a=>a>=0);
+  hbars("#chF",avIdx.map(a=>names[a]),[{cls:"bar-base",v:avIdx.map(a=>bm?bm.F[a]:0)},{cls:"bar-afaq",v:avIdx.map(a=>m.F[a])}],v=>v.toFixed(2),m.peak);
+  hbars("#chL",avIdx.map(a=>names[a]),[{cls:"bar-base",v:avIdx.map(a=>bm?bm.L[a]:0)},{cls:"bar-afaq",v:avIdx.map(a=>m.L[a])}],v=>String(v));
+  const sel=$("#bandWho"); const cur=sel.value;
+  sel.innerHTML=avIdx.map(a=>`<option value="${a}">A${a+1} · ${esc(M.crew[a].name)}</option>`).join("");
+  sel.value=(cur!==""&&avIdx.includes(+cur))?cur:String(tired);
+  renderBands();
+  const R=M.rules;
+  $("#report").textContent=
+`AFAQ browser solver · exact branch-and-bound on the LINGO model
+${RES.status==="optimal"?"Global optimal solution found.":"Search limit reached: best solution found."}
+Objective value:              ${m.Z.toFixed(5).padStart(12)}
+Objective bound:              ${(RES.status==="optimal"?m.Z.toFixed(5):"   n/a").padStart(12)}
+Infeasibilities:              ${"0.000000".padStart(12)}
+Search nodes explored:        ${String(RES.nodes).padStart(12)}
+Complete schedules checked:   ${String(RES.leaves).padStart(12)}
+Optimal schedules (ties):     ${String(RES.ties).padStart(12)}
+Elapsed runtime ms:           ${RES.ms.toFixed(1).padStart(12)}
+
+Model class:                  ${"MILP".padStart(12)}
+Total variables:              ${String(RES.size.total).padStart(12)}
+Integer variables:            ${String(RES.size.binaries).padStart(12)}
+Total constraints:            ${String(RES.size.cons).padStart(12)}
+
+Z = ${R.wT}·total fatigue (${m.total.toFixed(2)}) + ${R.wP}·peak P (${m.peak.toFixed(2)}) + ${R.wG}·(LMAX ${m.Lmax} − LMIN ${m.Lmin})`;
+  const on=new Set(); RES.assign.forEach(o=>o.crew.forEach(a=>on.add(a+"|"+o.j+"|"+o.b)));
+  $("#vt").innerHTML=`<tr><th>Variable</th><th>Astronaut</th><th>Task</th><th>Block</th><th>Fatigue</th><th>Cost (d × f)</th><th>Value</th></tr>`+
+    M.crew.map((c,a)=>`<tr${c.avail?"":' style="opacity:.5"'}><td>F${a+1}</td><td>A${a+1}</td><td colspan="3"></td><td>${m.F[a].toFixed(2)}</td><td>${m.F[a].toFixed(6)}</td></tr>`).join("")+
+    `<tr><td>P</td><td colspan="5"></td><td>${m.peak.toFixed(6)}</td></tr><tr><td>LMAX</td><td colspan="5"></td><td>${m.Lmax}</td></tr><tr><td>LMIN</td><td colspan="5"></td><td>${m.Lmin}</td></tr>`+
+    RES.vars.map(v=>{const x=on.has(v.a+"|"+v.j+"|"+v.b);return `<tr class="${x?"on":""}"><td>${varName(M,v)}</td><td>A${v.a+1}</td><td>${esc(M.tasks[v.j].name)}</td><td>B${v.b+1}</td><td>${v.f.toFixed(2)}</td><td>${v.cost.toFixed(2)}</td><td>${x?"1.000000":"0.000000"}</td></tr>`}).join("");
+  renderHeroBand();
+}
+function hbars(sel,cats,series,fmt,refLine){
+  const W=560, lw=170, rh=series.length*16+18, H=cats.length*rh+26, max=Math.max(1,...series.flatMap(s=>s.v))*1.15;
+  const x=v=>lw+(W-lw-50)*v/max;
+  let ticks=[]; const step=niceStep(max/4); for(let t=0;t<=max;t+=step) ticks.push(t);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  ticks.forEach(t=>s+=`<line class="grid" x1="${x(t)}" x2="${x(t)}" y1="4" y2="${H-20}"/><text x="${x(t)}" y="${H-6}" text-anchor="middle" style="fill:var(--muted)">${+t.toFixed(2)}</text>`);
+  cats.forEach((c,i)=>{const y0=i*rh+8;
+    s+=`<text class="lab" x="0" y="${y0+rh/2-2}">${esc(c.length>24?c.slice(0,23)+"…":c)}</text>`;
+    series.forEach((se,k)=>{const y=y0+k*16; const v=se.v[i];
+      s+=`<rect class="${se.cls}" x="${lw}" y="${y}" width="${Math.max(1,x(v)-lw)}" height="12" rx="2"/><text x="${x(v)+5}" y="${y+10}">${fmt(v)}</text>`});
+  });
+  if(refLine!==undefined) s+=`<line class="peak" x1="${x(refLine)}" x2="${x(refLine)}" y1="2" y2="${H-20}"/>`;
+  $(sel).innerHTML=s+"</svg>";
+}
+function niceStep(v){const p=Math.pow(10,Math.floor(Math.log10(v)));const n=v/p;return (n<1.5?1:n<3?2:n<7?5:10)*p}
+
+function screen(top,inner){return `<div class="screen"><div class="s-top"><span>AFAQ</span><i>${top}</i></div>${inner}</div>`}
+function level(f){return f>=2.2?["High",4]:f>=1.6?["Moderate",3]:["Low",1]}
+function bandScreens(a){
+  const c=M.crew[a], m=RES.m;
+  const first=M.blocks.findIndex((_,b)=>fatigue(M,a,b)!==null);
+  const mine=RES.assign.filter(o=>o.crew.includes(a)).sort((x,y)=>x.b-y.b);
+  const nxt=mine[0]; const fb=nxt?nxt.b:first; const f=fatigue(M,a,fb); const [lv,bars]=level(f);
+  const lost=Math.max(0,M.rules.sleepTarget-c.sleep), dHR=c.hr-c.hrN;
+  const s1=screen(fmtH(c.wake+1.9),`<div class="s-lab">Morning check-in</div><div class="s-lab" style="margin-top:6px">Sleep</div><div class="s-big" style="font-size:1.2rem">${c.sleep.toFixed(1)} h</div>${lost?`<div class="s-lvl" style="font-size:.55rem">${lost} h below target</div>`:""}<div class="s-lab" style="margin-top:4px">Resting HR</div><div class="s-big" style="font-size:1.1rem">${c.hr}</div><div class="s-lab">Stress ${c.stress}</div>`);
+  const s2=screen(fmtH(M.blocks[fb].start),`<div class="s-lab">Fatigue</div><div class="s-big">${f.toFixed(2)}</div><div class="s-lvl" style="${lv==="Low"?"color:#5ED3A8":""}">${lv}</div><div class="s-bars">${[1,2,3,4,5].map(i=>`<span class="${i<=bars?"":"off"}" style="${lv==="Low"&&i<=bars?"background:#5ED3A8":""}"></span>`).join("")}</div><div class="s-sub">Slept ${c.sleep} h<br>HR ${dHR>=0?"+":""}${dHR}</div>`);
+  let s3;
+  if(nxt){const t=M.tasks[nxt.j], mates=nxt.crew.filter(x=>x!==a).map(x=>M.crew[x].name);
+    const freeB=M.blocks.map((_,b)=>b).filter(b=>fatigue(M,a,b)!==null&&!mine.some(o=>o.b===b)&&b>nxt.b);
+    s3=screen(fmtH(M.blocks[nxt.b].start-0.33),`<div class="s-lab">Next task</div><div class="s-big" style="font-size:1.3rem">${fmtH(M.blocks[nxt.b].start)}</div><div style="font-size:.72rem;font-weight:600;font-family:var(--f-body)">${esc(t.name)}</div>${mates.length?`<div class="s-sub" style="margin-top:2px">With the ${esc(mates.join(", ").toLowerCase())}</div>`:""}${freeB.length?`<div class="s-sub" style="color:#7FB2FF">Rest again ${fmtH(M.blocks[freeB[0]].start)}</div>`:""}`);
+  } else s3=screen("—",`<div class="s-lab">No tasks today</div><div class="s-big" style="font-size:1.1rem">Rest day</div>`);
+  let msg="No change from the manual plan.";
+  if(BASE){
+    const was=BASE.assign.filter(o=>o.crew.includes(a));
+    const gone=was.filter(o=>!mine.some(x=>x.j===o.j));
+    const added=mine.filter(o=>!was.some(x=>x.j===o.j));
+    if(gone.length){const o=gone[0]; const nw=RES.assign.find(x=>x.j===o.j); const to=nw.crew.filter(x=>x!==a).map(x=>M.crew[x].name.toLowerCase());
+      msg=`${esc(M.tasks[o.j].name)} moved to the ${esc(to.join(", "))}`+(fatigue(M,a,o.b)!==null&&!mine.some(x=>x.b===o.b)?`<br><span style="color:#7FB2FF">You rest ${fmtH(M.blocks[o.b].start)}–${fmtH(M.blocks[o.b].end)}</span>`:"");}
+    else if(added.length){msg=`${esc(M.tasks[added[0].j].name)} added at ${fmtH(M.blocks[added[0].b].start)}`;}
+  }
+  const s4=screen(fmtH(c.wake+1.95),`<div style="color:#FF9A4D;font-size:1.1rem">⦀</div><div style="font-size:.78rem;font-weight:600;font-family:var(--f-body)">Plan updated</div><div class="s-sub" style="margin-top:4px">${msg}</div><div class="s-sub">Press to confirm</div>`);
+  return [s1,s2,s3,s4];
+}
+function renderBands(){
+  if(!RES||RES.status==="infeasible") return;
+  const a=+$("#bandWho").value; const caps=["1 · Morning check-in","2 · Fatigue score","3 · Next task","4 · Plan update"];
+  $("#bands").innerHTML=bandScreens(a).map((s,i)=>`<div class="bandmini"><div class="pod2">${s}</div><div class="cap">${caps[i]}</div></div>`).join("");
+}
+function renderHeroBand(){
+  if(!RES||RES.status==="infeasible") return;
+  const m=RES.m, a=m.F.indexOf(m.peak);
+  $("#heroScreen").outerHTML; $("#heroScreen").innerHTML=bandScreens(a)[1].replace(/^<div class="screen">|<\/div>$/g,"");
+  $("#heroTag1").innerHTML=`${esc(M.crew[a].name)} · slept <b>${M.crew[a].sleep} h</b>`;
+  $("#heroTag2").innerHTML=BASE?`peak fatigue <b>${BASE.m.peak.toFixed(2)} → ${m.peak.toFixed(2)}</b>`:`peak fatigue <b>${m.peak.toFixed(2)}</b>`;
+}
+
+/* ---------- scenarios ---------- */
+const SC=[["S1 Normal",15.50,13.28,7,3],["S2 Slept 4 h",23.06,13.70,7,3],["S3 High stress",20.09,17.36,7,3],["S4 Shifted sleep",17.80,13.28,5,3],["S5 Crew of 3",15.50,15.50,3,3]];
+function renderScenarios(){
+  hbars("#scP",SC.map(s=>s[0]),[{cls:"bar-base",v:SC.map(s=>s[1])},{cls:"bar-afaq",v:SC.map(s=>s[2])}],v=>v.toFixed(2));
+  hbars("#scG",SC.map(s=>s[0]),[{cls:"bar-base",v:SC.map(s=>s[3])},{cls:"bar-afaq",v:SC.map(s=>s[4])}],v=>String(v));
+  $("#scT").innerHTML=`<thead><tr><th>Scenario</th><th class="n">Peak · baseline</th><th class="n">Peak · AFAQ</th><th class="n">Peak reduction</th><th class="n">Gap · baseline</th><th class="n">Gap · AFAQ</th><th class="n">Gap reduction</th></tr></thead><tbody>`+
+    SC.map(s=>{const p=(s[1]-s[2])/s[1]*100,g=(s[3]-s[4])/s[3]*100;return `<tr><td>${s[0]}</td><td class="n">${s[1].toFixed(2)}</td><td class="n">${s[2].toFixed(2)}</td><td class="n ${p>0?"good":""}">${p.toFixed(1)}%</td><td class="n">${s[3]}</td><td class="n">${s[4]}</td><td class="n ${g>0?"good":""}">${g.toFixed(1)}%</td></tr>`}).join("")+"</tbody>";
+}
+
+/* ---------- code ---------- */
+const REF=document.getElementById("lingoRefSrc").textContent;
+function hl(src){return esc(src).split("\n").map(l=>{
+  if(/^\s*!/.test(l)) return `<span class="c-com">${l}</span>`;
+  return l.replace(/(@BIN|MIN)/g,'<span class="c-kw">$1</span>').replace(/(?<![A-Z\d_])(\d+(?:\.\d+)?)(?=\*)/g,'<span class="c-num">$1</span>');
+}).join("\n")}
+function cf(v){return (Math.round(v*100)/100).toFixed(2).replace(/0$/,"")}
+function genLingo(){
+  const vars=buildVars(M), R=M.rules, av=M.crew.map((c,a)=>c.avail?a:-1).filter(a=>a>=0), N=v=>varName(M,v);
+  const w=(k,s)=>k===1?s:`${k}*${s}`;
+  let o=`! AFAQ - generated for: ${M.name};\n`;
+  o+=`MIN = ${w(R.wT,"("+av.map(a=>"F"+(a+1)).join(" + ")+")").replace(/^\((.*)\)$/,"$1")} + ${w(R.wP,"P")} + ${R.wG===1?"LMAX - LMIN":R.wG+"*(LMAX - LMIN)"};\n`;
+  o+=`! Fatigue exposure of each astronaut (difficulty x fatigue);\n`;
+  av.forEach(a=>{const vs=vars.filter(v=>v.a===a);o+=`F${a+1} = ${vs.length?vs.map(v=>`${cf(v.cost)}*${N(v)}`).join(" + "):"0"};\n`});
+  o+=`! Workload of each astronaut (difficulty points);\n`;
+  av.forEach(a=>{const vs=vars.filter(v=>v.a===a);o+=`L${a+1} = ${vs.length?vs.map(v=>`${v.diff}*${N(v)}`).join(" + "):"0"};\n`});
+  o+=`! 1. Every task is completed;\n`;
+  M.tasks.forEach((t,j)=>{const vs=vars.filter(v=>v.j===j);o+=`${vs.length?vs.map(N).join(" + "):"0"} = ${t.crew};  ! ${t.name};\n`});
+  o+=`! 2. One task per astronaut per block;\n`;
+  av.forEach(a=>M.blocks.forEach((_,b)=>{const vs=vars.filter(v=>v.a===a&&v.b===b);if(vs.length>=2)o+=`${vs.map(N).join(" + ")} <= 1;\n`}));
+  o+=`! 3. Daily work limit: at most ${R.maxTasks} tasks per astronaut;\n`;
+  av.forEach(a=>{const vs=vars.filter(v=>v.a===a);if(vs.length)o+=`${vs.map(N).join(" + ")} <= ${R.maxTasks};\n`});
+  o+=`! 4. Peak fatigue;\n`+av.map(a=>`F${a+1} <= P;`).join("\n")+"\n";
+  o+=`! 5. Workload balance;\n`+av.map(a=>`L${a+1} <= LMAX;`).join("\n")+"\n"+av.map(a=>`L${a+1} >= LMIN;`).join("\n")+"\n";
+  o+=`! Binary variables;\n`;
+  av.forEach(a=>{const vs=vars.filter(v=>v.a===a);if(vs.length)o+=vs.map(v=>`@BIN(${N(v)});`).join(" ")+"\n"});
+  return o;
+}
+let XL=0;
+function sheets(){
+  const vars=buildVars(M), on=new Set(), bon=new Set();
+  if(RES&&RES.assign) RES.assign.forEach(o=>o.crew.forEach(a=>on.add(a+"|"+o.j+"|"+o.b)));
+  if(BASE) BASE.assign.forEach(o=>o.crew.forEach(a=>bon.add(a+"|"+o.j+"|"+o.b)));
+  const R=M.rules, L=n=>String.fromCharCode(65+n);
+  const s1={name:"1 Vitals",rows:[["Astronaut","Role","Available","Sleep (h)","Wake-up (h)","Resting HR","Normal HR","Stress"],...M.crew.map((c,a)=>[a+1,c.name,c.avail,c.sleep,c.wake,c.hr,c.hrN,c.stress])],fx:{}};
+  const s2={name:"2 Fatigue",rows:[["Astronaut",...M.blocks.map((b,i)=>`B${i+1} (${fmtH(mid(b))})`)],...M.crew.map((c,a)=>[a+1,...M.blocks.map((_,b)=>{const f=fatigue(M,a,b);return f===null?"off":f})])],fx:{}};
+  M.crew.forEach((c,a)=>M.blocks.forEach((bl,b)=>{const r=a+2;s2.fx[`${r},${b+1}`]=`=IF('1 Vitals'!C${r}*(${mid(bl)}>'1 Vitals'!E${r})=0,"off",ROUND(${R.cBase}+${R.cAwake}*(${mid(bl)}-'1 Vitals'!E${r})+${R.cSleep}*MAX(0,${R.sleepTarget}-'1 Vitals'!D${r})+${R.cHR}*MAX(0,'1 Vitals'!F${r}-'1 Vitals'!G${r})+${R.cStress}*'1 Vitals'!H${r},2))`}));
+  const s3={name:"3 Tasks",rows:[["Task","Name","Difficulty","Required crew","Allowed blocks","Qualified"],...M.tasks.map((t,j)=>[j+1,t.name,t.diff,t.crew,t.blocks.map((x,b)=>x?"B"+(b+1):"").filter(Boolean).join(" "),t.qual.map((x,a)=>x?"A"+(a+1):"").filter(Boolean).join(" ")])],fx:{}};
+  const s4={name:"4 Assignments",rows:[["Variable","Astronaut","Task","Block","Task name","Difficulty","Fatigue","Cost = Diff × Fatigue","AFAQ X","Baseline X","Cost × X (AFAQ)","Diff × X (AFAQ)"]],fx:{}};
+  vars.forEach((v,i)=>{const r=i+2,k=v.a+"|"+v.j+"|"+v.b,x=on.has(k)?1:0;
+    s4.rows.push([varName(M,v),v.a+1,v.j+1,v.b+1,M.tasks[v.j].name,v.diff,v.f,v.cost,x,bon.has(k)?1:0,r2(v.cost*x),v.diff*x]);
+    s4.fx[`${r},6`]=`=INDEX('2 Fatigue'!B2:${L(M.blocks.length)}${M.crew.length+1},B${r},D${r})`; s4.fx[`${r},7`]=`=F${r}*G${r}`; s4.fx[`${r},10`]=`=H${r}*I${r}`; s4.fx[`${r},11`]=`=F${r}*I${r}`;});
+  const n=vars.length+1;
+  const s5={name:"5 Results",rows:[["Astronaut","Fatigue F (AFAQ)","Workload L (AFAQ)","Tasks (AFAQ)","Fatigue F (base)","Workload L (base)"]],fx:{}};
+  M.crew.forEach((c,a)=>{const r=a+2;s5.rows.push([a+1,RES&&RES.m?RES.m.F[a]:"",RES&&RES.m?RES.m.L[a]:"",RES&&RES.m?RES.m.N[a]:"",BASE?BASE.m.F[a]:"",BASE?BASE.m.L[a]:""]);
+    s5.fx[`${r},1`]=`=SUMIF('4 Assignments'!B2:B${n},A${r},'4 Assignments'!K2:K${n})`; s5.fx[`${r},2`]=`=SUMIF('4 Assignments'!B2:B${n},A${r},'4 Assignments'!L2:L${n})`; s5.fx[`${r},3`]=`=SUMIF('4 Assignments'!B2:B${n},A${r},'4 Assignments'!I2:I${n})`;});
+  const e=M.crew.length+1;
+  if(RES&&RES.m){s5.rows.push([],["Metric","Manual baseline","AFAQ optimized","Reduction %"],
+    ["Total fatigue exposure",BASE?BASE.m.total:"",RES.m.total,BASE?pct(BASE.m.total,RES.m.total)+"%":""],
+    ["Peak fatigue",BASE?BASE.m.peak:"",RES.m.peak,BASE?pct(BASE.m.peak,RES.m.peak)+"%":""],
+    ["Workload gap",BASE?BASE.m.gap:"",RES.m.gap,BASE?pct(BASE.m.gap,RES.m.gap)+"%":""],
+    ["OBJECTIVE Z",BASE?BASE.m.Z:"",RES.m.Z,BASE?pct(BASE.m.Z,RES.m.Z)+"%":""]);
+    s5.fx[`${e+3},2`]=`=SUM(B2:B${e})`; s5.fx[`${e+4},2`]=`=MAX(B2:B${e})`; s5.fx[`${e+5},2`]=`=MAX(C2:C${e})-MIN(C2:C${e})`; s5.fx[`${e+6},2`]=`=C${e+3}+C${e+4}+C${e+5}`;
+  }
+  return [s1,s2,s3,s4,s5];
+}
+function renderXL(){
+  const S=sheets(), s=S[XL];
+  $("#xlTabs").innerHTML=S.map((x,i)=>`<button aria-pressed="${i===XL}" data-xl="${i}">${esc(x.name)}</button>`).join("");
+  const cols=Math.max(...s.rows.map(r=>r.length));
+  let h=`<table><tr><th></th>${Array.from({length:cols},(_,c)=>`<th>${String.fromCharCode(65+c)}</th>`).join("")}</tr>`;
+  s.rows.forEach((r,ri)=>{h+=`<tr><td class="rn">${ri+1}</td>`;for(let c=0;c<cols;c++){const v=r[c]===undefined?"":r[c];const f=s.fx[`${ri+1},${c}`];
+    h+=`<td class="${ri===0||(r.length===4&&r[0]==="Metric")?"h":""} ${f?"f":""}" data-r="${ri+1}" data-c="${c}">${esc(typeof v==="number"&&!Number.isInteger(v)?v.toFixed(2):v)}</td>`}h+="</tr>"});
+  $("#xlGrid").innerHTML=h+"</table>"; $("#xlRef").textContent="A1"; $("#xlFx").textContent=String(s.rows[0][0]);
+}
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-xl]"); if(t){XL=+t.dataset.xl;renderXL();return}
+  const td=e.target.closest(".xl-grid td[data-r]"); if(td){
+    document.querySelectorAll(".xl-grid td.sel").forEach(x=>x.classList.remove("sel")); td.classList.add("sel");
+    const s=sheets()[XL], r=+td.dataset.r, c=+td.dataset.c; $("#xlRef").textContent=String.fromCharCode(65+c)+r;
+    $("#xlFx").textContent=s.fx[`${r},${c}`]||td.textContent; return}
+  const cb=e.target.closest("#codeTabs [data-c]"); if(cb){
+    document.querySelectorAll("#codeTabs [data-c]").forEach(b=>b.setAttribute("aria-pressed",b===cb));
+    ["ref","gen","xl","run"].forEach(k=>$("#c-"+k).hidden=k!==cb.dataset.c); if(cb.dataset.c==="xl") renderXL(); return}
+  const cp=e.target.closest("[data-copy]"); if(cp){
+    const k=cp.dataset.copy; const txt=k==="ref"?REF:k==="gen"?genLingo():sheets()[XL].rows.map(r=>r.join("\t")).join("\n");
+    const done=()=>{cp.textContent="Copied";setTimeout(()=>cp.textContent=k==="xl"?"Copy this sheet for Excel":"Copy",1500)};
+    const fallback=()=>{const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");done()}catch(_){cp.textContent="Select and copy manually"}ta.remove()};
+    try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(_){fallback()}
+  }
+});
+function renderCode(){
+  $("#preRef").innerHTML=hl(REF);
+  $("#preGen").innerHTML=hl(genLingo());
+  $("#genLab").textContent=`afaq_mission.lng · rebuilt from your inputs (${M.name})`;
+  if(!$("#c-xl").hidden) renderXL();
+}
+function renderMatch(){
+  const isRef=JSON.stringify(M)===JSON.stringify(PRESETS.lingo.mission);
+  const z=RES&&RES.m?RES.m.Z.toFixed(2):"–";
+  $("#match").innerHTML=`<div><span class="muted">LINGO 22 · objective value</span><b>53.10</b></div>
+    <div><span class="muted">This page · current mission (${esc(M.name)})</span><b>${z}</b></div>
+    <div><span class="muted">Status</span><b>${isRef&&RES&&Math.abs(RES.m.Z-53.10)<1e-6?'<span class="good">Match · same optimum</span>':isRef?"Run to compare":"Load the reference to compare"}</b></div>`;
+}
+$("#loadRef").onclick=()=>{loadPreset("lingo");run(false);};
+
+/* ---------- stars ---------- */
+(function(){const c=$("#stars"),x=c.getContext("2d");function draw(){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;x.scale(d,d);
+  const col=getComputedStyle(document.documentElement).getPropertyValue("--muted");let s=7;const rnd=()=>(s=(s*16807)%2147483647)/2147483647;
+  for(let i=0;i<160;i++){x.globalAlpha=.15+rnd()*.5;x.fillStyle=col;const R=rnd()*1.3+.2;x.beginPath();x.arc(rnd()*r.width,rnd()*r.height,R,0,7);x.fill()}}
+  draw();addEventListener("resize",()=>{draw()});})();
+
+/* ---------- boot ---------- */
+renderBuilder(); renderScenarios();
+for(const k in PRESETS) CACHE[k]=solveEntry(PRESETS[k].mission);
+RES=CACHE.s2.RES; BASE=CACHE.s2.BASE; solvedSig=sig(); SK="s2";
+renderCode(); renderSchedule(); renderMatch();
+show(location.hash.slice(1)||"mission");
+</script>
+
+</body>
+</html>
